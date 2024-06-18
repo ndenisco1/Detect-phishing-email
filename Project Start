@@ -1,0 +1,89 @@
+echo "# Detect-phishing-email" >> README.md
+git init
+git add README.md
+git commit -m "first commit"
+git branch -M main
+git remote add origin https://github.com/ndenisco1/Detect-phishing-email.git
+git push -u origin main
+
+
+# detect phishing emails
+
+import pandas as pd
+import re
+import nltk
+from sklearn.feature_extraction.text import TfidVectorizer
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import classification_report, accuracy_score
+from nltk.corpus import stopwords 
+from nltk.stem import WordNetLemmatizer
+
+# Check NLTK is downloadded 
+nltk.download('stopwords')
+nltk.download('wordnet')
+
+#load data
+emails = pd.read_csv('emails.csv')
+
+# ETL
+def preprocess_text(text):
+    text = text.lower() # lowercase the text
+    text = re.sub(r'<[^>]*>', ' ', text)  # remove HTML tags
+    text = re.sub(r'http\S+|www\S+', ' ', text) # remove URLs
+    text = re.sub(r'[^a-z\s]', ' ', text) # remove special characters and numbers
+    tokens = text.split()
+    tokens = [word for word in tokens if word not in stopwords.words('english')]
+    lemmatizer = WordNetLemmatizer()
+    tokens = [lemmatizer.lemmatize(word) for word in tokens]
+    return ' ' .join(tokens)
+
+# apply preprocessing to the email content
+
+emails['clean_content'] = emails['content'].apply(preprocess_text)
+
+# Count of suspicious keywords
+suspicious_words = ["urgent", "password", "verify", "account", "bank"]
+emails['suspicious_count'] = emails['clean_content'].apply(lambda x: sum(word in x for word in suspicious_words))
+
+
+# encode labels
+
+emails['label'] = emails['label'].map({'ham': 0, 'phishing': 1})
+
+# feature extraction using TF-IDF
+vectorizer = TfidVectorizer(max_features=3000)
+X = vectorizer.fit_transform(emails['clean_content'])
+y = emails['label']
+
+from scipy.sparse import hstack  # Import hstack
+
+# Add suspicious keywords to the TF-IDF matrix
+X = vectorizer.fit_transform(emails['clean_content'])
+X_with_suspicious_count = hstack([X, emails['suspicious_count'].values.reshape(-1, 1)])
+
+
+# train-test split
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# model training with Random Forest
+model = RandomForestClassifier(n_estimators=100, random_state=42)
+model.fit(X_train, y_train)
+
+# model evaluation
+
+y_pred = model.predict(X_test)
+print(classification_report(y_test, y_pred))
+print(f'Accuracy: {accuracy_score(y_test, y_pred)}')
+
+# save the trained model and vectorizer for later use
+
+import pickle
+
+with open('phishing_detector_model.pkl', 'wb') as model_file:
+    pickle.dump(model, model_file)
+
+with open('tfidf_vectorizer.pkl', 'wb') as vectorizer_file:
+    pickle.dump(vectorizer, vectorizer_file)
+
+print("model and vectorizer saved successfully.")
